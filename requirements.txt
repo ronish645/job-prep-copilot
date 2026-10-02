@@ -1,0 +1,19 @@
+# Step 0: raw RAG by hand
+anthropic              # Claude API client
+python-dotenv          # loads ANTHROPIC_API_KEY from .env
+numpy                  # cosine similarity for by-hand retrieval
+sentence-transformers  # local embedding model (Claude has no embeddings API)
+
+# Steps 1-6: LangChain + vector store
+langchain
+langchain-anthropic
+langchain-community        # WebBaseLoader, PyPDFLoader
+langchain-text-splitters
+langchain-chroma
+chromadb
+pypdf                      # used by PyPDFLoader
+beautifulsoup4             # used by WebBaseLoader
+pydantic                   # structured briefing (step 5)
+
+# Testing (required from step 4)
+pytest
