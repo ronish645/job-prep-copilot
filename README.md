@@ -9,8 +9,9 @@ to learn Retrieval-Augmented Generation properly: first **by hand**, then with *
 then as a **full chat app**. Every step comes with a dated learning note in
 [`docs/journey/`](docs/journey/).
 
-> **Status:** Step 0 complete: a working RAG pipeline in ~140 lines of plain Python,
-> running over Cisco Meraki's API docs.
+> **Status:** Step 1 complete. Step 0 is a working RAG pipeline in ~140 lines of plain
+> Python over Cisco Meraki's API docs. Step 1 adds LangChain loaders that build a
+> company's knowledge base from saved markdown, PDFs and live web pages.
 
 ---
 
@@ -93,6 +94,26 @@ python rag_by_hand.py "How many API requests per second does Meraki allow?"
 To use a different company, drop `.md` files into a folder under `data/` and point
 `DATA_DIR` in `rag_by_hand.py` at it.
 
+### Loading a company's sources (step 1)
+
+Put everything for one company in `data/<company>/`:
+
+| Source | How | Loader |
+|---|---|---|
+| Saved pages | `*.md` files | `TextLoader` |
+| PDFs (e.g. a job posting) | `*.pdf` files | `PyPDFLoader`, one document per page |
+| Live pages | one URL per line in `urls.txt` | `WebBaseLoader` |
+
+```bash
+python -m copilot.loaders cisco    # prints every loaded document and its metadata
+pytest                             # 20 offline tests
+```
+
+Every document gets the same metadata (`source`, `source_type`, `company`, `title`), so
+later steps can cite and filter the same way for every source type. Broken inputs (404s,
+HTML saved as `.pdf`, corrupt PDFs, non-UTF-8 files) are skipped with a warning, so they
+neither crash the run nor slip into the knowledge base.
+
 ---
 
 ## Design decisions
@@ -113,6 +134,9 @@ To use a different company, drop `.md` files into a folder under `data/` and poi
   retrieve it. The fix is structure-aware splitting (step 2), not bigger numbers.
 - **The prompt is a safety rail.** "Use ONLY the sources, say so if they don't contain
   the answer" made Claude admit missing information instead of guessing.
+- **"Loaded" doesn't mean "loaded the right thing".** `WebBaseLoader` happily loaded a
+  404 page as content until I set `raise_for_status=True`, and a blocked download saved
+  an HTML error page as `.pdf`. Now both are caught and tested.
 - **Similarity scores are a useful signal.** On-topic questions scored about 0.69, an
   off-topic pricing question about 0.44, so a relevance floor is a cheap future guard.
 
@@ -123,7 +147,7 @@ Full notes: [`docs/journey/`](docs/journey/)
 ## Roadmap
 
 - [x] **0.** Raw RAG by hand: load → chunk → embed → retrieve → answer with sources
-- [ ] **1.** LangChain document loaders (`WebBaseLoader`, `PyPDFLoader`)
+- [x] **1.** LangChain document loaders (`WebBaseLoader`, `PyPDFLoader`)
 - [ ] **2.** Structure-aware text splitters
 - [ ] **3.** Persistent vector store: Chroma, one collection per company
 - [ ] **4.** Retriever + LCEL chain that returns sources (tests start here)
@@ -135,7 +159,7 @@ Full notes: [`docs/journey/`](docs/journey/)
 
 ## Tech stack
 
-Python 3.12 · Anthropic Claude · sentence-transformers · NumPy · LangChain (upcoming) ·
+Python 3.12 · Anthropic Claude · sentence-transformers · NumPy · LangChain · pytest ·
 Chroma (upcoming) · FastAPI (upcoming)
 
 ## Data note
