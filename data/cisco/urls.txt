@@ -1,0 +1,4 @@
+# Pages fetched live by WebBaseLoader. One URL per line; blank lines and # comments are ignored.
+https://developer.cisco.com/meraki/api-v1/getting-started/
+https://developer.cisco.com/meraki/api-v1/pagination/
+https://developer.cisco.com/meraki/api-v1/errors/

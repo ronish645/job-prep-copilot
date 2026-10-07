@@ -1,0 +1,7 @@
+[tool.pytest.ini_options]
+pythonpath = ["."]   # lets tests `import copilot` when run as plain `pytest`
+testpaths = ["tests"]
+filterwarnings = [
+    # langchain-community announces its own sunset on import; it's noise in test output
+    "ignore:.*langchain-community.*:DeprecationWarning",
+]
