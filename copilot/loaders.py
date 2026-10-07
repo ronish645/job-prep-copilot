@@ -3,7 +3,7 @@
 Everything for one company lives in data/<company>/:
   *.md      -> TextLoader     (pages we saved by hand in step 0)
   *.pdf     -> PyPDFLoader    (one Document per page, e.g. a job posting saved as PDF)
-  urls.txt  -> WebBaseLoader  (one URL per line, fetched live)
+  urls.txt  -> WebBaseLoader  (one URL per line, fetched live, converted HTML -> Markdown)
 
 Each loader returns different metadata. We normalise it so every Document carries the
 same keys (source, source_type, company, title), because later steps cite `source`.
@@ -14,6 +14,7 @@ Usage: python -m copilot.loaders cisco
 import os
 import re
 import sys
+import textwrap
 from collections import Counter
 from pathlib import Path
 
@@ -21,6 +22,7 @@ from pathlib import Path
 USER_AGENT = "job-prep-copilot/0.1 (learning project)"
 os.environ.setdefault("USER_AGENT", USER_AGENT)
 
+import html2text  # noqa: E402
 import requests  # noqa: E402
 from langchain_community.document_loaders import (  # noqa: E402
     PyPDFLoader,
@@ -37,6 +39,7 @@ COMPANY_NAME = re.compile(r"^[a-z0-9_-]+$")  # also blocks "../" path tricks
 PDF_MAGIC = b"%PDF-"
 PREVIEW_CHARS = 160
 WEB_TIMEOUT_S = 15  # don't hang forever on a slow server
+CODE_BLOCK = re.compile(r"\[code\]\n?(.*?)\n?\[/code\]", re.DOTALL)  # html2text's code markers
 
 
 # ---------- Cleaning ----------
@@ -44,6 +47,21 @@ def clean_text(text: str) -> str:
     """Strip trailing spaces and collapse runs of blank lines left over from HTML layout."""
     lines = [line.rstrip() for line in text.splitlines()]
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+
+
+def html_to_markdown(html: str) -> str:
+    """Convert HTML to Markdown, keeping the headings and tables that get_text() throws away."""
+    converter = html2text.HTML2Text()
+    converter.body_width = 0        # don't hard-wrap lines at 78 chars
+    converter.ignore_links = True   # keep link text, drop URLs (noise for embeddings)
+    converter.ignore_images = True
+    converter.mark_code = True      # wrap <pre> blocks in [code]...[/code] so we can fence them
+    return CODE_BLOCK.sub(fence_code, converter.handle(html))
+
+
+def fence_code(match: re.Match) -> str:
+    """Turn a [code] block into a ``` fence. Unfenced, a '# comment' line looks like a heading."""
+    return "```\n" + textwrap.dedent(match.group(1)).strip("\n") + "\n```"
 
 
 def split_header(text: str) -> tuple[dict, str]:
@@ -130,32 +148,30 @@ def read_urls(urls_file: Path) -> list[str]:
     return urls
 
 
+def fetch_page(url: str) -> tuple[str, str]:
+    """Fetch one URL and return (title, markdown). Raises requests.RequestException on failure."""
+    # raise_for_status: without it, a 404/403 page is "loaded" as if it were content
+    loader = WebBaseLoader(
+        url,
+        header_template={"User-Agent": USER_AGENT},
+        raise_for_status=True,
+        requests_kwargs={"timeout": WEB_TIMEOUT_S},
+    )
+    # scrape() gives the parsed HTML (with the encoding fixed) instead of load()'s flat text
+    soup = loader.scrape()
+    title = soup.title.get_text(strip=True) if soup.title else url
+    return title, html_to_markdown(str(soup))
+
+
 def load_web(urls: list[str], company: str) -> list[Document]:
     docs = []
     for url in urls:  # one at a time, so one dead link doesn't sink the whole batch
         try:
-            # raise_for_status: without it, a 404/403 page is "loaded" as if it were content
-            loader = WebBaseLoader(
-                url,
-                header_template={"User-Agent": USER_AGENT},
-                raise_for_status=True,
-                requests_kwargs={"timeout": WEB_TIMEOUT_S},
-            )
-            pages = loader.load()
+            title, markdown = fetch_page(url)
         except requests.RequestException as e:  # HTTP errors, timeouts, DNS failures
             print(f"  skip {url}: {type(e).__name__}: {e}", file=sys.stderr)
             continue
-        if not pages:
-            print(f"  skip {url}: loader returned nothing", file=sys.stderr)
-            continue
-        page = pages[0]
-        docs.append(make_doc(
-            page.page_content,
-            source=url,
-            source_type="web",
-            company=company,
-            title=page.metadata.get("title", url),
-        ))
+        docs.append(make_doc(markdown, source=url, source_type="web", company=company, title=title))
     return docs
 
 

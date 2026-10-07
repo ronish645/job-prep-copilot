@@ -13,6 +13,8 @@ langchain-chroma
 chromadb
 pypdf                      # used by PyPDFLoader
 beautifulsoup4             # used by WebBaseLoader
+html2text                  # HTML -> Markdown, keeps headings and tables (step 2)
+transformers               # MiniLM tokenizer, so chunk sizes are measured in tokens (step 2)
 pydantic                   # structured briefing (step 5)
 
 # Testing (required from step 4)

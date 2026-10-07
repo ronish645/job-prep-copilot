@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 import requests
+from bs4 import BeautifulSoup
 from langchain_core.documents import Document
 
 import copilot.loaders as loaders
@@ -18,20 +19,42 @@ def company_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return folder
 
 
+FAKE_PAGE = "<html><head><title>Hi</title></head><body><h1>Hello</h1><p>World</p></body></html>"
+
+
 class FakeWebLoader:
-    """Stands in for WebBaseLoader: returns a page, or raises for URLs containing 'dead'."""
+    """Stands in for WebBaseLoader: returns a parsed page, or raises for URLs containing 'dead'."""
 
     def __init__(self, url: str, **kwargs) -> None:
         self.url = url
 
-    def load(self) -> list[Document]:
+    def scrape(self) -> BeautifulSoup:
         if "dead" in self.url:
             raise requests.HTTPError(f"404 Client Error for url: {self.url}")
-        return [Document(page_content="\n\n\n\nHello   \n\n\n\nWorld", metadata={"title": "Hi"})]
+        return BeautifulSoup(FAKE_PAGE, "html.parser")
 
 
 def test_clean_text_collapses_blank_lines_and_trailing_spaces():
     assert loaders.clean_text("\n\n\na  \n\n\n\n\nb\n") == "a\n\nb"
+
+
+def test_html_to_markdown_keeps_headings_and_tables():
+    html = (
+        "<h2>Auth</h2><table><tr><th>Feature</th><th>API Keys</th></tr>"
+        "<tr><td>Token lifetime</td><td>Permanent until revoked</td></tr></table>"
+    )
+    markdown = loaders.clean_text(loaders.html_to_markdown(html))
+    unspaced = markdown.replace(" |", "|").replace("| ", "|")  # html2text's pipe spacing varies
+    assert markdown.startswith("## Auth")
+    assert "Feature|API Keys" in unspaced
+    assert "Token lifetime|Permanent until revoked" in unspaced
+
+
+def test_html_to_markdown_fences_code_so_comments_are_not_headings():
+    html = "<pre><code># read the key from env\nexport KEY=1</code></pre>"
+    markdown = loaders.html_to_markdown(html)
+    assert "```\n# read the key from env\nexport KEY=1\n```" in markdown
+    assert "[code]" not in markdown
 
 
 def test_split_header_moves_source_and_title_into_metadata():
@@ -89,8 +112,9 @@ def test_load_web_cleans_pages_and_skips_failed_urls(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(loaders, "WebBaseLoader", FakeWebLoader)
     docs = loaders.load_web(["https://x.dev/ok", "https://x.dev/dead"], "acme")
     assert len(docs) == 1
-    assert docs[0].page_content == "Hello\n\nWorld"
+    assert docs[0].page_content == "# Hello\n\nWorld"
     assert docs[0].metadata["source"] == "https://x.dev/ok"
+    assert docs[0].metadata["title"] == "Hi"
     assert docs[0].metadata["source_type"] == "web"
 
 
